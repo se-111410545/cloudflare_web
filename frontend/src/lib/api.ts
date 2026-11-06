@@ -63,9 +63,11 @@ export const api = {
 };
 
 /**
- * 產生 R2 商品圖片 URL（私有桶統一由 Worker 代理輸出）
+ * 產生圖片 URL
+ *
+ * 檔案由後端的 /uploads/:key 端點輸出（實體檔案存放於本機 uploads/ 資料夾）。
  */
 export function imageUrl(key?: string | null): string | undefined {
   if (!key) return undefined;
-  return `${API_BASE}/products/image/${encodeURIComponent(key)}`;
+  return `${API_BASE}/uploads/${encodeURIComponent(key)}`;
 }

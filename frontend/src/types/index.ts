@@ -10,7 +10,8 @@ export interface Product {
   category_name?: string | null;
   name: string;
   price: number;
-  image_r2_key?: string | null;
+  /** 檔案鍵，實體檔案存放於 uploads/ 資料夾 */
+  image_key?: string | null;
   is_available: number | boolean;
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -134,7 +134,7 @@ export default function Admin() {
       fd.append('productId', String(productId));
       await api.postForm('/products/products/upload', fd);
       await loadCatalog();
-      notify('圖片已上傳至 R2');
+      notify('圖片已上傳至本機 uploads/');
     } catch (err: any) {
       notify(err.message || '上傳失敗', true);
     }
@@ -344,9 +344,9 @@ export default function Admin() {
                     <tr key={p.id} className="border-b border-gray-100 last:border-0">
                       <td className="px-4 py-2">
                         <label className="relative block h-12 w-12 cursor-pointer overflow-hidden rounded border border-gray-200 bg-gray-50">
-                          {p.image_r2_key ? (
+                          {p.image_key ? (
                             <img
-                              src={imageUrl(p.image_r2_key)}
+                              src={imageUrl(p.image_key)}
                               alt={p.name}
                               className="h-full w-full object-cover"
                             />

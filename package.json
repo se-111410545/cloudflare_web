@@ -1,21 +1,34 @@
 {
   "name": "cloudflare_web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "POS & Online Ordering System on Cloudflare (Workers + D1 + R2 + Pages)",
+  "description": "POS & Online Ordering System (Workers + D1 + Pages) — 本機檔案儲存版本",
   "scripts": {
-    "dev": "wrangler dev src/index.ts",
-    "deploy": "wrangler deploy",
-    "d1:create": "wrangler d1 create pos-db",
-    "d1:migrate": "wrangler d1 execute pos-db --file=migrations/0001_initial.sql",
-    "d1:migrate:local": "wrangler d1 execute pos-db --local --file=migrations/0001_initial.sql"
+    "dev": "tsx watch server/local.ts",
+    "dev:worker": "wrangler dev --local --port 8787 --ip 127.0.0.1",
+    "dev:web": "npm --prefix frontend run dev",
+    "db:migrate": "node scripts/migrate.mjs --local",
+    "db:migrate:remote": "node scripts/migrate.mjs --remote",
+    "db:seed": "wrangler d1 execute pos-db --local --file=seeds/001_demo_data.sql",
+    "db:seed:remote": "wrangler d1 execute pos-db --remote --file=seeds/001_demo_data.sql",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "db:reset": "node scripts/reset-db.mjs",
+    "db:query": "node scripts/query.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
+    "build": "npm run typecheck && npm run build:frontend",
+    "build:frontend": "npm --prefix frontend run build",
+    "deploy:worker": "wrangler deploy",
+    "deploy:frontend": "npm run build:frontend && wrangler pages deploy frontend/dist --project-name pos-frontend"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241106.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.4.0",
     "wrangler": "^3.68.0"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.0",
     "hono": "^4.4.0",
     "jose": "^5.2.0"
   }

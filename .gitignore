@@ -33,3 +33,7 @@ Thumbs.db
 
 # Cloudflare 快取
 .cache/
+
+# 本機檔案儲存（商品圖片等使用者上傳內容）
+uploads/*
+!uploads/.gitkeep

@@ -12,7 +12,7 @@ app.get('/products', async (c) => {
   const { results } = await c.env.DB
     .prepare(
       `SELECT p.id, p.category_id, c.name as category_name, p.name, p.price,
-              p.image_r2_key, p.is_available
+              p.image_key, p.is_available
        FROM products p LEFT JOIN categories c ON c.id = p.category_id
        WHERE p.is_available = 1
        ORDER BY c.sort_order ASC, p.name ASC`

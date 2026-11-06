@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Category, Product } from '@/types';
 import { cn } from '@/lib/utils';
@@ -7,7 +7,7 @@ interface ProductGridProps {
   products: Product[];
   categories: Category[];
   onSelect: (product: Product) => void;
-  /** 圖片 URL 產生器 (依 R2 key) */
+  /** 圖片 URL 產生器 (依檔案鍵) */
   imageUrl?: (key: string | null | undefined) => string | undefined;
 }
 
@@ -71,7 +71,7 @@ export function ProductGrid({ products, categories, onSelect, imageUrl }: Produc
       {/* 商品網格 */}
       <div className="grid flex-1 auto-rows-min grid-cols-2 gap-3 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
         {filtered.map((product) => {
-          const img = imageUrl?.(product.image_r2_key);
+          const img = imageUrl?.(product.image_key);
           const unavailable = !product.is_available;
           return (
             <button

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -203,7 +203,7 @@ export default function Order() {
       <div className="mx-4 mt-2 space-y-2 pb-4">
         {filtered.map((p) => {
           const line = cart.find((i) => i.product.id === p.id);
-          const img = imageUrl(p.image_r2_key);
+          const img = imageUrl(p.image_key);
           return (
             <div key={p.id} className="card-pos flex items-center gap-3 p-3">
               <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100">

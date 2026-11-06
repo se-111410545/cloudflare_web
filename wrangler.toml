@@ -2,18 +2,27 @@ name = "pos-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-06"
 
+# ---------------------------------------------------------------
 # D1 資料庫綁定 (DB)
-# database_id 為佔位值，部署前請執行 `npx wrangler d1 create pos-db` 並填入實際 ID
+# database_id 為佔位值，部署前請執行 `npx wrangler d1 create pos-db`
+# 並將回傳的 database_id 填入下方。
+# 本機開發請使用 `npm run db:migrate`（--local），資料會存於
+# .wrangler/state/v3/d1/，由 server/local.ts 直接讀取同一份檔案。
+# ---------------------------------------------------------------
 [[d1_databases]]
 binding = "DB"
 database_name = "pos-db"
 database_id = "00000000-0000-0000-0000-000000000000"
 
-# R2 儲存桶綁定 (BUCKET) - 用於商品圖片上傳
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "pos-product-images"
+# ---------------------------------------------------------------
+# 檔案儲存
+#
+# 原先使用 Cloudflare R2，現已改為「本機檔案儲存」：
+#   - 本機開發：server/local.ts 寫入專案根目錄的 uploads/ 資料夾
+#   - Worker 部署：自動退回 D1 的 uploads 資料表 (BLOB)
+# 因此不需要 R2 綁定。
+# ---------------------------------------------------------------
 
-# 開發用預設值；正式環境請改用 `wrangler secret put JWT_SECRET`
+# 開發用預設值；正式環境請使用 `npx wrangler secret put JWT_SECRET`
 [vars]
 JWT_SECRET = "dev-secret-change-me-in-production"
