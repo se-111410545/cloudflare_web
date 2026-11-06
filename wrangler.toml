@@ -1,0 +1,19 @@
+name = "pos-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-06"
+
+# D1 資料庫綁定 (DB)
+# database_id 為佔位值，部署前請執行 `npx wrangler d1 create pos-db` 並填入實際 ID
+[[d1_databases]]
+binding = "DB"
+database_name = "pos-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+# R2 儲存桶綁定 (BUCKET) - 用於商品圖片上傳
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "pos-product-images"
+
+# 開發用預設值；正式環境請改用 `wrangler secret put JWT_SECRET`
+[vars]
+JWT_SECRET = "dev-secret-change-me-in-production"
