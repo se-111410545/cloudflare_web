@@ -18,6 +18,11 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  listLocalSqliteFiles,
+  hasPosSchema,
+  writeLocalDbPointer,
+} from './local-db.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -71,6 +76,13 @@ function resolveDatabaseName() {
   return name;
 }
 
+/** 從 wrangler.toml 取得 database_id */
+function readDatabaseId() {
+  const toml = fs.readFileSync(path.join(ROOT, 'wrangler.toml'), 'utf8');
+  const block = toml.match(/\[\[d1_databases\]\]([\s\S]*?)(?=\n\[|$)/);
+  return block?.[1]?.match(/database_id\s*=\s*"([^"]+)"/)?.[1] ?? 'unknown';
+}
+
 // ---------------------------------------------------------------
 // 主流程
 // ---------------------------------------------------------------
@@ -108,6 +120,12 @@ const files = fs
   .filter((f) => f.endsWith('.sql'))
   .sort();
 
+// 遷移前先記錄各 SQLite 檔的修改時間，
+// 遷移後即可判定哪個檔案是「本次 database_id 實際對應的那一個」
+const mtimeBefore = new Map(
+  listLocalSqliteFiles().map((f) => [f, fs.statSync(f).mtimeMs])
+);
+
 if (files.length === 0) {
   console.error(`✖ ${MIGRATIONS_DIR} 內沒有 .sql 檔案`);
   process.exit(1);
@@ -139,3 +157,38 @@ console.log(
     ? '\n✔ 資料庫已是最新，無需遷移。\n'
     : `\n✔ 遷移完成，共套用 ${count} 個檔案。\n`
 );
+
+// ---------------------------------------------------------------
+// 4. 記錄本機 D1 對應的 SQLite 檔案
+//
+// wrangler --local 的檔名是依 database_id 推導的雜湊，
+// 若 database_id 變更過，目錄中會有多個 .sqlite 檔。
+// 寫入指標檔讓 server/local.ts 能確定開啟正確的資料庫。
+// ---------------------------------------------------------------
+if (!remote) {
+  const dbId = readDatabaseId();
+  const all = listLocalSqliteFiles();
+
+  // 優先取「本次被寫入」的檔案（mtime 有變動），
+  // 其次取含 schema 且最近修改者
+  const touched = all
+    .filter((f) => {
+      const before = mtimeBefore.get(f);
+      return before === undefined || fs.statSync(f).mtimeMs !== before;
+    })
+    .filter(hasPosSchema);
+
+  const candidates =
+    touched.length > 0
+      ? touched.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+      : all
+          .filter(hasPosSchema)
+          .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+
+  if (candidates.length > 0) {
+    writeLocalDbPointer(dbId, candidates[0]);
+    console.log(`  ℹ 本機 D1 指標已更新：`);
+    console.log(`     ${candidates[0]}`);
+    console.log('');
+  }
+}

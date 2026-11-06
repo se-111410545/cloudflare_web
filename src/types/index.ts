@@ -8,6 +8,11 @@ export interface Env {
    * 未注入時自動退回 D1 BLOB 儲存。
    */
   STORAGE?: FileStorage;
+  /**
+   * Cloudflare 靜態資產綁定（Workers Static Assets）。
+   * 提供於 wrangler.toml 的 [assets] 區塊，用於輸出前端 SPA。
+   */
+  ASSETS?: Fetcher;
   JWT_SECRET: string;
 }
 

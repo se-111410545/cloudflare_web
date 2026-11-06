@@ -1,8 +1,8 @@
 {
   "name": "cloudflare_web",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "POS & Online Ordering System (Workers + D1 + Pages) — 本機檔案儲存版本",
+  "description": "POS & Online Ordering System (Workers + D1 + Static Assets) — 本機檔案儲存版本",
   "scripts": {
     "dev": "tsx watch server/local.ts",
     "dev:worker": "wrangler dev --local --port 8787 --ip 127.0.0.1",
@@ -17,8 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
     "build": "npm run typecheck && npm run build:frontend",
     "build:frontend": "npm --prefix frontend run build",
-    "deploy:worker": "wrangler deploy",
-    "deploy:frontend": "npm run build:frontend && wrangler pages deploy frontend/dist --project-name pos-frontend"
+    "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241106.0",

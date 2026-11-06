@@ -1,0 +1,7 @@
+# 本機開發用的環境變數（複製成 .dev.vars 後使用）
+#
+#   cp .dev.vars.example .dev.vars
+#
+# .dev.vars 已被 .gitignore 排除，不會被提交到版本庫。
+# 正式環境請改用：npx wrangler secret put JWT_SECRET
+JWT_SECRET="dev-secret-change-me-in-production"

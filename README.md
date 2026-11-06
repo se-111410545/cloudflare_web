@@ -21,6 +21,7 @@ cloudflare_web/
 │   └── 001_demo_data.sql          # 種子資料（角色/權限/員工/商品）
 ├── scripts/
 │   ├── migrate.mjs                # 遷移執行器（自動記錄已套用檔案）
+│   ├── local-db.mjs               # 本機 D1 指標檔（記錄 database_id 對應的 SQLite）
 │   ├── reset-db.mjs               # 重設本機資料庫
 │   └── query.mjs                  # 查詢本機 D1
 ├── server/                        # Node 本機執行環境（可寫本機檔案）
@@ -45,7 +46,7 @@ cloudflare_web/
 │       ├── orders.ts              # 訂單建立、狀態流轉
 │       ├── uploads.ts             # 檔案輸出/刪除
 │       └── public.ts              # 顧客免登入菜單與下單
-└── frontend/                      # React + Vite + Tailwind（Cloudflare Pages）
+└── frontend/                      # React + Vite + Tailwind
     ├── vite.config.ts             # @ alias、/api 代理（含 rewrite）
     └── src/
         ├── App.tsx, main.tsx, index.css
@@ -171,7 +172,13 @@ Cloudflare Worker 的執行環境（workerd）**沒有檔案系統**。實測結
 | 環境 | 實作 | 儲存位置 |
 |---|---|---|
 | Node 本機 | `LocalDiskStorage` | `uploads/<檔案鍵>` |
-| Worker 部署 | `D1BlobStorage` | D1 `uploads` 資料表 (BLOB) |
+| Worker 部署 | `D1BlobStorage` | D1 `uploads` 資料表（base64 TEXT） |
+
+> **為什麼 Worker 後備方案用 base64 而不是 BLOB？**
+> D1 在將查詢結果序列化回應時，會把 BLOB 欄位轉成「逗號分隔的十進位數字字串」
+> （例如 `"137,80,78,13,..."`），導致二進位內容失真（下載的檔案大小與內容都不對）。
+> 改存 base64 字串可完整往返，且為純 ASCII 不受編碼影響。
+> 對應遷移：`migrations/0004_uploads_base64.sql`。
 
 兩者皆以 `key` 為索引，`products.image_key` 存放該鍵，
 前端透過 `GET /uploads/:key` 取得檔案。
@@ -280,27 +287,94 @@ staff:manage / permission:manage / analytics:view
 
 ---
 
-## 部署到 Cloudflare
+## 部署到 Cloudflare（Worker 同時提供前端與 API）
+
+Worker 同時掛載 **靜態資產（前端 SPA）** 與 **API**，只需部署一次：
+
+```
+https://pos-api.<你的子網域>.workers.dev/          → 前端 POS 主畫面
+https://pos-api.<你的子網域>.workers.dev/order     → 顧客線上點餐
+https://pos-api.<你的子網域>.workers.dev/api/health → API 健康檢查
+```
+
+### 靜態資產與 SPA 路由
+
+`wrangler.toml`：
+
+```toml
+[assets]
+directory = "./frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+```
+
+| 設定 | 作用 |
+|---|---|
+| `directory` | 前端建置輸出目錄（`npm run build:frontend` 產生） |
+| `binding = "ASSETS"` | 讓 Worker 透過 `env.ASSETS` 讀取靜態檔 |
+| `not_found_handling` | 未匹配路徑以 `index.html` 回應（SPA fallback） |
+| `run_worker_first = true` | 所有請求先進 Worker，由 `src/app.ts` 分流 API / 靜態檔 / index.html |
+
+> wrangler 3.x 的 `run_worker_first` 僅支援 boolean；若升級到 wrangler 4.x，
+> 可改為陣列形式（例：`run_worker_first = ["/api/*"]`）讓靜態檔直接由 Cloudflare 提供，
+> 減少 Worker CPU 消耗。
+
+`src/app.ts` 的 SPA fallback 邏輯：
+
+```
+請求 → API 路由？  → 是 → 回傳 JSON
+       → 否 → env.ASSETS 有此路徑？ → 是 → 回傳靜態檔
+                          → 否 → 回傳 index.html（前端路由接管）
+```
+
+### API 路徑前綴
+
+前端固定使用 `/api/*`，避免與 SPA 路由衝突（`/admin` 同時是 API 前綴與頁面路徑）。
+後端同時掛載 `/api/*` 與根路徑，兩者皆可用：
+
+| 前綴 | 範例 |
+|---|---|
+| `/api/*`（前端使用） | `/api/orders`、`/api/admin/users`、`/api/menu/products` |
+| 根路徑（方便測試） | `/orders`、`/admin/users`、`/menu/products` |
+
+### 部署步驟
 
 ```bash
-# 1. 建立資源，把 database_id 填回 wrangler.toml
+# 1. 登入（若尚未登入）
 npx wrangler login
-npx wrangler d1 create pos-db
-npx wrangler r2 bucket create pos-product-images   # 已改本機儲存，可略過
 
-# 2. 遷移 + 種子資料
+# 2. 確認 wrangler.toml 的 database_id 已填入實際值
+#    （執行 npx wrangler d1 create pos-db 後取得）
+
+# 3. 遷移 + 種子資料（雲端）
 npm run db:migrate:remote
 npm run db:seed:remote
 
-# 3. 設定 JWT 密鑰
+# 4. 設定 JWT 密鑰
+#    （JWT_SECRET 不可同時存在於 wrangler.toml [vars] 與 secret，否則會名稱衝突）
 npx wrangler secret put JWT_SECRET
 
-# 4. 部署
-npm run deploy:worker
-npm run deploy:frontend
+# 5. 建置前端並部署 Worker（前端與 API 一起上線）
+npm run deploy
 ```
 
-部署後於 Cloudflare Pages 設定環境變數 `VITE_API_BASE=https://pos-api.<子網域>.workers.dev`。
+`npm run deploy` = 型別檢查 → 前端建置 → `wrangler deploy`（含 assets）。
+
+### 本機開發的環境變數
+
+`JWT_SECRET` 在本機使用 `.dev.vars`（已被 git 忽略）：
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+`npm run dev`（Node 伺服器）會自動使用預設值；
+`npm run dev:worker`（wrangler dev）則讀取 `.dev.vars`。
+
+> 若要以 Pages 部署前端（與 Worker 分離），請另外設定
+> `frontend/public/_redirects`（內容 `/*  /index.html  200`）並執行 `wrangler pages deploy`。
+> 目前預設為 Worker 一體部署，前端與 API 同網域，不需要額外設定 CORS 或 API_BASE。
 
 > Worker 環境沒有檔案系統，圖片會自動改存 D1 的 `uploads` 資料表 (BLOB)。
 > 若需要大量圖片，建議重新啟用 R2（`createStorage()` 已預留該介面）。

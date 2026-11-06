@@ -3,6 +3,27 @@ main = "src/index.ts"
 compatibility_date = "2024-11-06"
 
 # ---------------------------------------------------------------
+# 靜態資產（前端 SPA）
+#
+# Worker 同時提供 API 與前端頁面：
+#   - 靜態檔（JS/CSS/圖片）由 Cloudflare 直接提供，不經過 Worker
+#   - API 路徑先交給 Worker 處理
+#   - 其餘路徑以 index.html 作為 SPA fallback（/pos、/admin、/order…）
+#
+# 需先執行 `npm run build:frontend` 產生 frontend/dist
+# ---------------------------------------------------------------
+[assets]
+directory = "./frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# wrangler 3.x 的 run_worker_first 僅支援 boolean。
+# 設為 true 讓所有請求先進 Worker，由 src/app.ts 的 SPA fallback 判斷：
+#   - 命中 API 路由 → 回傳 JSON
+#   - 其餘 → 由 ASSETS 綁定輸出靜態檔或 index.html
+# （若改用 wrangler 4.x，可改為陣列形式，只對 API 路徑優先執行 Worker）
+run_worker_first = true
+
+# ---------------------------------------------------------------
 # D1 資料庫綁定 (DB)
 # database_id 為佔位值，部署前請執行 `npx wrangler d1 create pos-db`
 # 並將回傳的 database_id 填入下方。
@@ -12,7 +33,7 @@ compatibility_date = "2024-11-06"
 [[d1_databases]]
 binding = "DB"
 database_name = "pos-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "4ee430ba-df90-4de3-87f7-b026ce3a1c3e"
 
 # ---------------------------------------------------------------
 # 檔案儲存
@@ -23,6 +44,11 @@ database_id = "00000000-0000-0000-0000-000000000000"
 # 因此不需要 R2 綁定。
 # ---------------------------------------------------------------
 
-# 開發用預設值；正式環境請使用 `npx wrangler secret put JWT_SECRET`
-[vars]
-JWT_SECRET = "dev-secret-change-me-in-production"
+# ---------------------------------------------------------------
+# 環境變數
+#
+# JWT_SECRET 不寫在此處：
+#   - 本機開發：使用 .dev.vars（已 git 忽略，範例見 .dev.vars.example）
+#   - 正式環境：使用 `npx wrangler secret put JWT_SECRET`
+# （若同時存在 [vars] 與 secret，會因綁定名稱重複而無法設定 secret）
+# ---------------------------------------------------------------
