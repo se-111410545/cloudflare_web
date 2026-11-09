@@ -1,6 +1,7 @@
 ﻿import { Hono } from 'hono';
 import { AppEnv } from '../types';
 import { authMiddleware, requireRole, checkPermission } from '../middleware/auth';
+import { requireAdminWrite } from '../middleware/admin-guard';
 import { createStorage } from '../storage';
 
 const app = new Hono<AppEnv>();
@@ -45,32 +46,50 @@ app.get('/categories', authMiddleware, async (c) => {
   return c.json({ categories: results });
 });
 
-app.post('/categories', authMiddleware, checkPermission('product:manage'), async (c) => {
-  const { name, sortOrder } = await c.req.json<{ name: string; sortOrder?: number }>();
-  const result = await c.env.DB
-    .prepare('INSERT INTO categories (name, sort_order) VALUES (?, ?)')
-    .bind(name, sortOrder ?? 0)
-    .run();
-  return c.json({ success: true, categoryId: result.meta?.last_row_id });
-});
+app.post(
+  '/categories',
+  authMiddleware,
+  checkPermission('product:manage'),
+  requireAdminWrite,
+  async (c) => {
+    const { name, sortOrder } = await c.req.json<{ name: string; sortOrder?: number }>();
+    const result = await c.env.DB
+      .prepare('INSERT INTO categories (name, sort_order) VALUES (?, ?)')
+      .bind(name, sortOrder ?? 0)
+      .run();
+    return c.json({ success: true, categoryId: result.meta?.last_row_id });
+  }
+);
 
-app.put('/categories/:id', authMiddleware, checkPermission('product:manage'), async (c) => {
-  const id = c.req.param('id');
-  const { name, sortOrder } = await c.req.json<{ name?: string; sortOrder?: number }>();
-  await c.env.DB
-    .prepare(
-      `UPDATE categories SET name = COALESCE(?, name), sort_order = COALESCE(?, sort_order) WHERE id = ?`
-    )
-    .bind(name ?? null, sortOrder ?? null, id)
-    .run();
-  return c.json({ success: true });
-});
+app.put(
+  '/categories/:id',
+  authMiddleware,
+  checkPermission('product:manage'),
+  requireAdminWrite,
+  async (c) => {
+    const id = c.req.param('id');
+    const { name, sortOrder } = await c.req.json<{ name?: string; sortOrder?: number }>();
+    await c.env.DB
+      .prepare(
+        `UPDATE categories SET name = COALESCE(?, name), sort_order = COALESCE(?, sort_order) WHERE id = ?`
+      )
+      .bind(name ?? null, sortOrder ?? null, id)
+      .run();
+    return c.json({ success: true });
+  }
+);
 
-app.delete('/categories/:id', authMiddleware, requireRole(['Boss']), async (c) => {
-  const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM categories WHERE id = ?').bind(id).run();
-  return c.json({ success: true });
-});
+app.delete(
+  '/categories/:id',
+  authMiddleware,
+  requireRole(['Boss']),
+  requireAdminWrite,
+  async (c) => {
+    const id = c.req.param('id');
+    await c.env.DB.prepare('DELETE FROM categories WHERE id = ?').bind(id).run();
+    return c.json({ success: true });
+  }
+);
 
 // -------------------------------------------------------
 // 商品 CRUD
@@ -86,122 +105,148 @@ app.get('/products', authMiddleware, async (c) => {
   return c.json({ products: results });
 });
 
-app.post('/products', authMiddleware, checkPermission('product:manage'), async (c) => {
-  const { categoryId, name, price, isAvailable } = await c.req.json<{
-    categoryId: number;
-    name: string;
-    price: number;
-    isAvailable?: boolean;
-  }>();
-  const result = await c.env.DB
-    .prepare(
-      `INSERT INTO products (category_id, name, price, is_available)
-       VALUES (?, ?, ?, ?)`
-    )
-    .bind(categoryId, name, price, isAvailable ?? true ? 1 : 0)
-    .run();
-  return c.json({ success: true, productId: result.meta?.last_row_id });
-});
-
-app.put('/products/:id', authMiddleware, checkPermission('product:manage'), async (c) => {
-  const id = c.req.param('id');
-  const { categoryId, name, price, imageKey, isAvailable } = await c.req.json<{
-    categoryId?: number;
-    name?: string;
-    price?: number;
-    imageKey?: string | null;
-    isAvailable?: boolean;
-  }>();
-
-  // 取出舊圖片鍵，若被替換則刪除舊檔案
-  const existing = await c.env.DB
-    .prepare('SELECT image_key FROM products WHERE id = ?')
-    .bind(id)
-    .first<{ image_key: string | null }>();
-
-  await c.env.DB
-    .prepare(
-      `UPDATE products SET category_id = COALESCE(?, category_id), name = COALESCE(?, name),
-                          price = COALESCE(?, price), image_key = COALESCE(?, image_key),
-                          is_available = COALESCE(?, is_available)
-       WHERE id = ?`
-    )
-    .bind(
-      categoryId ?? null,
-      name ?? null,
-      price ?? null,
-      imageKey ?? null,
-      isAvailable ?? null,
-      id
-    )
-    .run();
-
-  if (existing?.image_key && imageKey !== undefined && imageKey !== existing.image_key) {
-    await createStorage(c.env).delete(existing.image_key);
+app.post(
+  '/products',
+  authMiddleware,
+  checkPermission('product:manage'),
+  requireAdminWrite,
+  async (c) => {
+    const { categoryId, name, price, isAvailable } = await c.req.json<{
+      categoryId: number;
+      name: string;
+      price: number;
+      isAvailable?: boolean;
+    }>();
+    const result = await c.env.DB
+      .prepare(
+        `INSERT INTO products (category_id, name, price, is_available)
+         VALUES (?, ?, ?, ?)`
+      )
+      .bind(categoryId, name, price, isAvailable ?? true ? 1 : 0)
+      .run();
+    return c.json({ success: true, productId: result.meta?.last_row_id });
   }
+);
 
-  return c.json({ success: true });
-});
+app.put(
+  '/products/:id',
+  authMiddleware,
+  checkPermission('product:manage'),
+  requireAdminWrite,
+  async (c) => {
+    const id = c.req.param('id');
+    const { categoryId, name, price, imageKey, isAvailable } = await c.req.json<{
+      categoryId?: number;
+      name?: string;
+      price?: number;
+      imageKey?: string | null;
+      isAvailable?: boolean;
+    }>();
 
-app.delete('/products/:id', authMiddleware, requireRole(['Boss']), async (c) => {
-  const id = c.req.param('id');
+    // 取出舊圖片鍵，若被替換則刪除舊檔案
+    const existing = await c.env.DB
+      .prepare('SELECT image_key FROM products WHERE id = ?')
+      .bind(id)
+      .first<{ image_key: string | null }>();
 
-  // 先取得圖片鍵並刪除實體檔案
-  const product = await c.env.DB
-    .prepare('SELECT image_key FROM products WHERE id = ?')
-    .bind(id)
-    .first<{ image_key: string | null }>();
+    await c.env.DB
+      .prepare(
+        `UPDATE products SET category_id = COALESCE(?, category_id), name = COALESCE(?, name),
+                            price = COALESCE(?, price), image_key = COALESCE(?, image_key),
+                            is_available = COALESCE(?, is_available)
+         WHERE id = ?`
+      )
+      .bind(
+        categoryId ?? null,
+        name ?? null,
+        price ?? null,
+        imageKey ?? null,
+        isAvailable ?? null,
+        id
+      )
+      .run();
 
-  if (product?.image_key) {
-    await createStorage(c.env).delete(product.image_key);
+    if (existing?.image_key && imageKey !== undefined && imageKey !== existing.image_key) {
+      await createStorage(c.env).delete(existing.image_key);
+    }
+
+    return c.json({ success: true });
   }
+);
 
-  await c.env.DB.prepare('DELETE FROM products WHERE id = ?').bind(id).run();
-  return c.json({ success: true });
-});
+app.delete(
+  '/products/:id',
+  authMiddleware,
+  requireRole(['Boss']),
+  requireAdminWrite,
+  async (c) => {
+    const id = c.req.param('id');
+
+    // 先取得圖片鍵並刪除實體檔案
+    const product = await c.env.DB
+      .prepare('SELECT image_key FROM products WHERE id = ?')
+      .bind(id)
+      .first<{ image_key: string | null }>();
+
+    if (product?.image_key) {
+      await createStorage(c.env).delete(product.image_key);
+    }
+
+    await c.env.DB.prepare('DELETE FROM products WHERE id = ?').bind(id).run();
+    return c.json({ success: true });
+  }
+);
 
 // -------------------------------------------------------
 // 圖片上傳（multipart/form-data）
-// 檔案寫入本機 uploads/ 資料夾（Node 執行環境）或 D1 BLOB 後備方案
-app.post('/products/upload', authMiddleware, checkPermission('product:upload'), async (c) => {
-  const formData = await c.req.formData();
-  const file = formData.get('file') as unknown as File;
-  const productId = formData.get('productId') as string | null;
+// 檔案寫入本機 uploads/ 資料夾（Node 執行環境）或 D1 base64 後備方案
+app.post(
+  '/products/upload',
+  authMiddleware,
+  checkPermission('product:upload'),
+  requireAdminWrite,
+  async (c) => {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as unknown as File;
+    const productId = formData.get('productId') as string | null;
 
-  if (!file) {
-    return c.json({ error: 'No file provided' }, 400);
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      return c.json(
+        {
+          error: `Unsupported file type: ${file.type || 'unknown'} (allowed: ${ALLOWED_IMAGE_TYPES.join(', ')})`,
+        },
+        400
+      );
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return c.json({ error: 'File too large (max 5MB)' }, 400);
+    }
+
+    const buffer = await file.arrayBuffer();
+    const key = buildFileKey(file.name);
+
+    const storage = createStorage(c.env);
+    await storage.put(key, buffer, file.type);
+
+    // 有指定商品時同步更新 image_key
+    if (productId) {
+      await c.env.DB
+        .prepare('UPDATE products SET image_key = ? WHERE id = ?')
+        .bind(key, productId)
+        .run();
+    }
+
+    return c.json({
+      success: true,
+      key,
+      url: `/uploads/${encodeURIComponent(key)}`,
+      size: buffer.byteLength,
+      contentType: file.type,
+    });
   }
-  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-    return c.json(
-      { error: `Unsupported file type: ${file.type || 'unknown'} (allowed: ${ALLOWED_IMAGE_TYPES.join(', ')})` },
-      400
-    );
-  }
-  if (file.size > MAX_UPLOAD_BYTES) {
-    return c.json({ error: 'File too large (max 5MB)' }, 400);
-  }
-
-  const buffer = await file.arrayBuffer();
-  const key = buildFileKey(file.name);
-
-  const storage = createStorage(c.env);
-  await storage.put(key, buffer, file.type);
-
-  // 有指定商品時同步更新 image_key
-  if (productId) {
-    await c.env.DB
-      .prepare('UPDATE products SET image_key = ? WHERE id = ?')
-      .bind(key, productId)
-      .run();
-  }
-
-  return c.json({
-    success: true,
-    key,
-    url: `/uploads/${encodeURIComponent(key)}`,
-    size: buffer.byteLength,
-    contentType: file.type,
-  });
-});
+);
 
 export default app;

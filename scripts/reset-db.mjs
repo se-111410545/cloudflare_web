@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const D1_STATE_DIR = path.join(ROOT, '.wrangler', 'state', 'v3', 'd1');
+const WRANGLER_BIN = path.join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
 
 function run(args) {
   execFileSync(process.execPath, args, {
@@ -34,9 +35,10 @@ if (fs.existsSync(D1_STATE_DIR)) {
   console.log('  ○ 本機 D1 尚未建立，略過清除');
 }
 
+// 1. 套用 schema 遷移
 run([path.join(ROOT, 'scripts', 'migrate.mjs'), '--local']);
 
-const WRANGLER_BIN = path.join(ROOT, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
-run([WRANGLER_BIN, 'd1', 'execute', 'pos-db', '--local', '--file', path.join(ROOT, 'seeds', '001_demo_data.sql')]);
+// 2. 匯入種子（含 bcrypt 雜湊的使用者憑證）
+run([path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs'), path.join(ROOT, 'scripts', 'seed.mjs')]);
 
 console.log('\n✔ 本機資料庫已重設完成。\n');

@@ -5,19 +5,21 @@
   "description": "POS & Online Ordering System (Workers + D1 + Static Assets) — 本機檔案儲存版本",
   "scripts": {
     "dev": "tsx watch server/local.ts",
-    "dev:worker": "wrangler dev --local --port 8787 --ip 127.0.0.1",
+    "dev:worker": "node scripts/sync-dev-vars.mjs && wrangler dev --local --port 8787 --ip 127.0.0.1",
     "dev:web": "npm --prefix frontend run dev",
     "db:migrate": "node scripts/migrate.mjs --local",
     "db:migrate:remote": "node scripts/migrate.mjs --remote",
-    "db:seed": "wrangler d1 execute pos-db --local --file=seeds/001_demo_data.sql",
-    "db:seed:remote": "wrangler d1 execute pos-db --remote --file=seeds/001_demo_data.sql",
+    "db:seed": "tsx scripts/seed.mjs",
+    "db:seed:remote": "tsx scripts/seed.mjs --remote",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:reset": "node scripts/reset-db.mjs",
+    "db:reset-admin": "tsx scripts/reset-admin.mjs",
     "db:query": "node scripts/query.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
     "build": "npm run typecheck && npm run build:frontend",
     "build:frontend": "npm --prefix frontend run build",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "env:sync": "node scripts/sync-dev-vars.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241106.0",
@@ -28,6 +30,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "bcryptjs": "^3.0.3",
     "hono": "^4.4.0",
     "jose": "^5.2.0"
   }

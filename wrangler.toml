@@ -48,7 +48,15 @@ database_id = "4ee430ba-df90-4de3-87f7-b026ce3a1c3e"
 # 環境變數
 #
 # JWT_SECRET 不寫在此處：
-#   - 本機開發：使用 .dev.vars（已 git 忽略，範例見 .dev.vars.example）
+#   - 本機開發：使用 .dev.vars（由 .env 自動同步，見 .env.example）
 #   - 正式環境：使用 `npx wrangler secret put JWT_SECRET`
 # （若同時存在 [vars] 與 secret，會因綁定名稱重複而無法設定 secret）
+#
+# ALLOW_REMOTE_ADMIN：是否允許「遠端」管理寫入
+#   不設定（預設）：線上部署時封鎖高風險寫入
+#     （增刪員工/權限、商品與分類、檔案、刪除訂單），
+#     並將 Boss 權限降級為 Store Manager。
+#     本機（localhost / 127.0.0.1）不受影響，管理功能完整可用。
+#   設為 true：開放遠端管理寫入（僅在部署環境確定可信時使用）
+#     npx wrangler secret put ALLOW_REMOTE_ADMIN   →   輸入 true
 # ---------------------------------------------------------------

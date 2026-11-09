@@ -22,9 +22,9 @@ import { cn } from '@/lib/utils';
 type TabKey = 'products' | 'categories' | 'staff' | 'permissions';
 
 export default function Admin() {
-  const { user } = useAuth();
+  const { user, adminRestricted } = useAuth();
   const navigate = useNavigate();
-  const isBoss = user?.role === 'Boss';
+  const isBoss = user?.role === 'Boss' && !adminRestricted;
 
   const [tab, setTab] = useState<TabKey>('products');
   const [error, setError] = useState('');
@@ -266,6 +266,22 @@ export default function Admin() {
       </div>
 
       <div className="p-4">
+        {adminRestricted && (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-sm font-bold text-amber-800">遠端管理寫入已封鎖</p>
+            <p className="mt-1 text-xs leading-relaxed text-amber-700">
+              目前為線上部署環境，預設封鎖高風險操作（新增/修改/刪除員工與權限、商品與分類、檔案、刪除訂單），
+              最高管理者權限已降級為店長。下單與結帳功能不受影響。
+              <br />
+              若確實需要開啟，請設定{' '}
+              <code className="rounded bg-amber-100 px-1 py-0.5">
+                ALLOW_REMOTE_ADMIN=true
+              </code>{' '}
+              後重新部署，或改由本機管理。
+            </p>
+          </div>
+        )}
+
         {ok && <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{ok}</p>}
         {error && (
           <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
@@ -319,7 +335,7 @@ export default function Admin() {
                   </select>
                 </div>
                 <div className="flex items-end">
-                  <Button type="submit" className="w-full">
+                  <Button type="submit" className="w-full" disabled={adminRestricted}>
                     <Plus className="mr-1.5 h-4 w-4" />
                     新增
                   </Button>
@@ -358,7 +374,8 @@ export default function Admin() {
                           <input
                             type="file"
                             accept="image/*"
-                            className="absolute inset-0 cursor-pointer opacity-0"
+                            className="absolute inset-0 cursor-pointer opacity-0 disabled:cursor-not-allowed"
+                            disabled={adminRestricted}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) handleUploadImage(p.id, file);
@@ -376,6 +393,7 @@ export default function Admin() {
                         <button
                           type="button"
                           onClick={() => handleToggleAvailable(p)}
+                          disabled={adminRestricted}
                           className={cn(
                             'rounded-full px-2.5 py-1 text-xs font-semibold',
                             p.is_available
@@ -390,6 +408,7 @@ export default function Admin() {
                         <button
                           type="button"
                           onClick={() => handleDeleteProduct(p.id)}
+                          disabled={adminRestricted}
                           className="rounded p-1.5 text-red-500 hover:bg-red-50"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -415,7 +434,7 @@ export default function Admin() {
                   required
                 />
               </div>
-              <Button type="submit">
+              <Button type="submit" disabled={adminRestricted}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 新增
               </Button>
@@ -428,6 +447,7 @@ export default function Admin() {
                   <button
                     type="button"
                     onClick={() => handleDeleteCategory(c.id)}
+                      disabled={adminRestricted}
                     className="rounded p-1.5 text-red-500 hover:bg-red-50"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -503,7 +523,7 @@ export default function Admin() {
                   </select>
                 </div>
               </div>
-              <Button type="submit" className="mt-3">
+              <Button type="submit" className="mt-3" disabled={adminRestricted}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 新增員工
               </Button>
@@ -533,6 +553,7 @@ export default function Admin() {
                         <button
                           type="button"
                           onClick={() => handleDeleteStaff(s.id)}
+                          disabled={adminRestricted}
                           className="rounded p-1.5 text-red-500 hover:bg-red-50"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -587,6 +608,7 @@ export default function Admin() {
                             type="checkbox"
                             checked={checked}
                             onChange={() => togglePermission(r.id, perm.id)}
+                            disabled={adminRestricted}
                             className="h-4 w-4 cursor-pointer rounded border-gray-300 text-pos-600 focus:ring-pos-500"
                           />
                         </td>

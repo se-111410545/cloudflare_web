@@ -1,10 +1,17 @@
 import { createMiddleware } from 'hono/factory';
 import { jwt } from 'hono/jwt';
 import { AppEnv, JWTPayload } from '../types';
+import { isRemoteLocked, resolveAdminScope, downgradeBossRole } from './admin-guard';
 
 /**
  * JWT 認證中介軟體
+ *
  * 驗證 Bearer Token 並將解碼後的 payload 存入 c.set('user', ...)
+ *
+ * 同時套用「管理者權限環境隔離」：
+ *   遠端環境且未設定 ALLOW_REMOTE_ADMIN 時，
+ *   Boss 的權限會降級為 Store Manager（hierarchy 3），
+ *   因此無法在線上變更員工、角色權限等高風險資料。
  */
 export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const mw = jwt({
@@ -13,7 +20,15 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   });
   // hono/jwt 會將驗證後的 payload 放入 c.get('jwtPayload')
   await mw(c, async () => {
-    const payload = c.get('jwtPayload') as JWTPayload;
+    let payload = c.get('jwtPayload') as JWTPayload;
+
+    // 遠端鎖定：最高管理者權限降級（role 與 roleId 一併更換）
+    if (isRemoteLocked(c) && payload.role === 'Boss') {
+      payload = await downgradeBossRole(c, payload);
+    } else {
+      payload = { ...payload, adminScope: resolveAdminScope(c) };
+    }
+
     c.set('user', payload);
     await next();
   });

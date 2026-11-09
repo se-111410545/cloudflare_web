@@ -28,7 +28,16 @@ export default function Login() {
           ? { pin: pin.trim() }
           : { email: email.trim(), password };
       const data = await api.post('/auth/login', payload);
-      login(data.token, data.user);
+      login(data.token, {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        role: data.user.role,
+        roleId: data.user.roleId,
+        hierarchyLevel: data.user.hierarchyLevel,
+        hasPin: data.user.hasPin,
+        adminScope: data.adminScope ?? 'full',
+      });
       navigate('/pos');
     } catch (err: any) {
       setError(err.message || '登入失敗');

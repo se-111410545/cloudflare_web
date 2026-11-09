@@ -9,19 +9,26 @@
 
 ```
 cloudflare_web/
-├── wrangler.toml                  # Worker 設定（D1 / JWT_SECRET，已無 R2）
+├── wrangler.toml                  # Worker 設定（D1 / ALLOW_REMOTE_ADMIN，已無 R2）
 ├── package.json                   # 根目錄 scripts（含 db:migrate 等）
 ├── tsconfig.json                  # Worker 型別檢查
 ├── tsconfig.server.json           # Node 本機伺服器型別檢查
+├── .env.example                   # ★ 環境變數範例（複製成 .env 後修改）
 ├── migrations/                    # D1 Schema 遷移（由 scripts/migrate.mjs 套用）
 │   ├── 0001_initial.sql
 │   ├── 0002_local_storage.sql     # image_r2_key → image_key、uploads 資料表
-│   └── 0003_products_unique_index.sql
+│   ├── 0003_products_unique_index.sql
+│   ├── 0004_uploads_base64.sql    # D1 BLOB 改 base64 TEXT
+│   └── 0005_credential_hardening.sql # 明文憑證失效 + pin_lookup
 ├── seeds/
-│   └── 001_demo_data.sql          # 種子資料（角色/權限/員工/商品）
+│   └── 001_demo_data.sql          # 種子資料（角色/權限/商品，不含憑證）
 ├── scripts/
 │   ├── migrate.mjs                # 遷移執行器（自動記錄已套用檔案）
 │   ├── local-db.mjs               # 本機 D1 指標檔（記錄 database_id 對應的 SQLite）
+│   ├── seed.mjs                   # 種子（含 bcrypt 雜湊的使用者憑證）
+│   ├── reset-admin.mjs            # 重設管理者 PIN／密碼
+│   ├── env.mjs                    # .env 解析器
+│   ├── sync-dev-vars.mjs          # .env → .dev.vars（供 wrangler dev）
 │   ├── reset-db.mjs               # 重設本機資料庫
 │   └── query.mjs                  # 查詢本機 D1
 ├── server/                        # Node 本機執行環境（可寫本機檔案）
@@ -38,7 +45,12 @@ cloudflare_web/
 │   │   ├── d1-blob.ts             # D1 BLOB 後備實作
 │   │   └── index.ts               # createStorage() 解析
 │   ├── types/index.ts
-│   ├── middleware/auth.ts         # JWT + RBAC + 動態權限中介軟體
+│   ├── lib/
+│   │   ├── password.ts            # bcrypt 雜湊與驗證
+│   │   └── pin-lookup.ts          # PIN 查詢雜湊（sha256，供索引查找）
+│   ├── middleware/
+│   │   ├── auth.ts                # JWT + RBAC + 動態權限
+│   │   └── admin-guard.ts         # ★ 管理權限的環境隔離
 │   └── routes/
 │       ├── auth.ts                # 登入 (PIN/帳密)、註冊
 │       ├── admin.ts               # 員工/角色/權限對應
@@ -74,13 +86,23 @@ cloudflare_web/
 ```bash
 npm install
 npm --prefix frontend install
+
+# ★ 建立本機環境變數並設定你自己的管理者 PIN
+cp .env.example .env
+```
+
+接著編輯 `.env`，至少設定 `ADMIN_PIN` 與 `ADMIN_PASSWORD`：
+
+```bash
+ADMIN_PIN="你自己的 4-6 位數 PIN"        # 不要用 0001 / 1234 等常見值
+ADMIN_PASSWORD="你自己的登入密碼"
 ```
 
 ### 啟動（三個終端機，或分開執行）
 
 ```bash
 # 終端機 1：初始化資料庫（只需執行一次）
-npm run db:setup        # = db:migrate + db:seed
+npm run db:setup        # = db:migrate + db:seed（會讀取 .env 的 ADMIN_PIN）
 
 # 終端機 2：啟動後端 API（http://127.0.0.1:8787）
 npm run dev
@@ -96,12 +118,96 @@ npm run dev:web
 
 ### 測試帳號
 
-| 角色 | PIN | 帳號 | 密碼 |
+| 角色 | 帳號 | PIN | 密碼 |
 |---|---|---|---|
-| Boss 老闆 | `0001` | boss@example.com | password123 |
-| Store Manager 店長 | `0002` | manager@example.com | password123 |
-| Supervisor 小主管 | `0003` | supervisor@example.com | password123 |
-| Staff 一般員工 | `0004` | staff@example.com | password123 |
+| Boss 老闆 | boss@example.com | `.env` 的 `ADMIN_PIN` | `.env` 的 `ADMIN_PASSWORD` |
+| Store Manager 店長 | manager@example.com | `.env` 的 `MANAGER_PIN`，未設定則隨機產生 | 同 PIN |
+| Supervisor 小主管 | supervisor@example.com | `.env` 的 `SUPERVISOR_PIN`，未設定則隨機產生 | 同 PIN |
+| Staff 一般員工 | staff@example.com | `.env` 的 `STAFF_PIN`，未設定則隨機產生 | 同 PIN |
+
+> 未在 `.env` 設定的 PIN 會由種子腳本**隨機產生並於執行結果中顯示**，
+> 不再使用任何硬編碼的預設值（避免對話紀錄或公開程式碼洩漏）。
+
+### 更換自己的 PIN
+
+```bash
+npm run db:reset-admin              # 本機，互動式輸入（輸入時不會顯示）
+npm run db:reset-admin -- --pin 8642  # 直接指定
+npm run db:reset-admin -- --remote  # 同步更新雲端 D1
+```
+
+重設後舊 PIN 立即失效，新的 PIN 以 bcrypt 雜湊寫入。
+
+---
+
+## 🔐 安全設計
+
+### 1. 憑證一律以 bcrypt 雜湊儲存
+
+- 密碼與 PIN 都以 **bcrypt**（bcryptjs 3.x，純 JS，Worker 可用）雜湊後寫入 D1
+- `verifySecret()` 會先檢查字串是否為合法 bcrypt 雜湊格式；
+  **非 bcrypt 格式一律視為無效，絕不進行明文比對**
+  → 舊版種子資料中的明文 PIN／密碼自動失效
+- API 回應不再包含 `pin_code` 欄位，避免雜湊外洩
+
+**PIN 查詢欄位（`pin_lookup`）**
+
+bcrypt 使用隨機鹽，同一 PIN 每次產生的雜湊都不同，無法用 `WHERE pin_code = ?`
+索引查找。因此額外存一欄 SHA-256 的 `pin_lookup` 供快速定位候選使用者：
+
+```
+登入流程：pin → sha256("pos-pin:" + pin) → 索引查到該員工 → bcrypt.compare() 驗證
+```
+
+驗證權威仍是 bcrypt；`pin_lookup` 僅用於「找出是哪位員工」。
+
+### 2. 管理者權限的環境隔離
+
+`src/middleware/admin-guard.ts` 依請求來源分成兩種模式：
+
+| 環境 | 判定 | 管理寫入 | Boss 權限 |
+|---|---|---|---|
+| 本機 | hostname 為 `localhost` / `127.0.0.1` | ✅ 完整可用 | Boss（完整） |
+| 線上 + `ALLOW_REMOTE_ADMIN` 未設定 | hostname 為 `*.workers.dev` 等 | ❌ 封鎖高風險寫入 | 降級為 Store Manager |
+| 線上 + `ALLOW_REMOTE_ADMIN=true` | 同上 | ✅ 完整可用 | Boss（完整） |
+
+**遠端鎖定時被封鎖的高風險操作：**
+
+- 新增 / 修改 / 刪除員工（`staff:manage`）
+- 新增 / 修改角色權限對應（`permission:manage`）
+- 新增 / 修改 / 刪除商品與分類（`product:manage`）
+- 上傳 / 刪除檔案
+- 刪除訂單
+
+**不受影響的日常 POS 作業**：下單、結帳、訂單狀態流轉（待處理→製作中→完成）、
+顧客線上下單、瀏覽菜單。
+
+降級時會**一併更換 `roleId`**（Boss → Store Manager），
+確保 `checkPermission()` 依新角色判斷權限，而非沿用 Boss 的權限。
+
+前端也會依 `adminScope` 顯示黃色警示橫幅並停用相關按鈕，
+但真正的防護在後端 API 層（前端停用僅為操作體驗）。
+
+### 3. 環境變數
+
+`.env` 是設定的唯一來源（已 git 忽略），`.env.example` 為範例：
+
+| 變數 | 用途 |
+|---|---|
+| `JWT_SECRET` | JWT 簽章密鑰（本機；正式環境用 `wrangler secret put`） |
+| `ADMIN_PIN` | Boss 的 PIN（**必填**，4-6 位數） |
+| `ADMIN_PASSWORD` | Boss 的登入密碼（**必填**） |
+| `MANAGER_PIN` / `SUPERVISOR_PIN` / `STAFF_PIN` | 其他角色 PIN（選填，未設定則隨機產生） |
+| `ALLOW_REMOTE_ADMIN` | 是否允許遠端管理寫入（預設 `false`） |
+
+`npm run dev:worker` 會自動把 `.env` 同步成 `.dev.vars`（wrangler dev 只讀 `.dev.vars`）。
+
+正式環境的 `JWT_SECRET` 與 `ALLOW_REMOTE_ADMIN` 使用 Cloudflare secret：
+
+```bash
+npx wrangler secret put JWT_SECRET
+npx wrangler secret put ALLOW_REMOTE_ADMIN   # 輸入 true 才開放遠端管理
+```
 
 ---
 
@@ -114,11 +220,13 @@ npm run dev:web
 |---|---|
 | `npm run db:migrate` | 套用 `migrations/*.sql`（本機 `--local`），自動跳過已套用者 |
 | `npm run db:migrate:remote` | 同上，但套用至雲端 D1 |
-| `npm run db:seed` | 匯入 `seeds/001_demo_data.sql`（冪等，可重複執行） |
+| `npm run db:seed` | 匯入種子 + 以 bcrypt 寫入使用者憑證（讀取 `.env`） |
 | `npm run db:seed:remote` | 同上，雲端 D1 |
 | `npm run db:setup` | `db:migrate` + `db:seed`（首次設定用這個） |
 | `npm run db:reset` | 清空本機 D1 並重新建立（改了 migrations 後使用） |
+| `npm run db:reset-admin` | 重設管理者 PIN／密碼（互動式，預設本機） |
 | `npm run db:query -- "SELECT ..."` | 查詢本機 D1 |
+| `npm run env:sync` | 將 `.env` 同步為 `.dev.vars`（`dev:worker` 會自動執行） |
 
 ### 為什麼不再直接用 `wrangler d1 execute`？
 
@@ -363,14 +471,14 @@ npm run deploy
 
 ### 本機開發的環境變數
 
-`JWT_SECRET` 在本機使用 `.dev.vars`（已被 git 忽略）：
+`JWT_SECRET` 在本機使用 `.env`（已被 git 忽略）：
 
 ```bash
-cp .dev.vars.example .dev.vars
+cp .env.example .env
 ```
 
-`npm run dev`（Node 伺服器）會自動使用預設值；
-`npm run dev:worker`（wrangler dev）則讀取 `.dev.vars`。
+`npm run dev`（Node 伺服器）直接讀取 `.env`；
+`npm run dev:worker`（wrangler dev）會先自動同步成 `.dev.vars` 再啟動。
 
 > 若要以 Pages 部署前端（與 Worker 分離），請另外設定
 > `frontend/public/_redirects`（內容 `/*  /index.html  200`）並執行 `wrangler pages deploy`。
@@ -383,7 +491,9 @@ cp .dev.vars.example .dev.vars
 
 ## 已知待辦
 
-- [ ] 密碼改為 bcrypt / Argon2 雜湊（目前為示範用明文比對）
+- [x] 密碼與 PIN 改為 bcrypt 雜湊（bcryptjs，Worker 相容）
+- [x] 管理者權限的環境隔離（本機完整 / 遠端鎖定）
+- [x] 移除種子資料中的硬編碼明文 PIN，改由 `.env` 提供
 - [ ] PIN 登入加入嘗試次數限制與鎖定
 - [ ] 線上訂單即時推播（WebSocket Durable Object 或 Cloudflare Pub/Sub）
 - [ ] 銷售分析報表頁面

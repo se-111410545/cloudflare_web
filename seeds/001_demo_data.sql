@@ -1,5 +1,10 @@
--- 種子資料：角色 / 權限 / 角色權限對應 / 初始使用者 / 分類 / 商品
--- 密碼與 PIN 為示範用明文（正式環境請改用 bcrypt 雜湊並透過後台建立帳號）
+-- 種子資料：角色 / 權限 / 角色權限對應 / 分類 / 商品
+--
+-- ⚠️ 使用者的密碼與 PIN 不在此檔案內。
+--    憑證必須經過 bcrypt 雜湊，因此由 scripts/seed.mjs 負責寫入，
+--    讀取 .env 的 ADMIN_PIN 與各角色 *_PIN。
+--
+-- 執行方式：npm run db:seed （或 npm run db:seed:remote）
 
 -- ============================================
 -- 角色
@@ -48,16 +53,6 @@ INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES
 -- 一般員工：僅無折扣
 INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES
   (4, 1);
-
--- ============================================
--- 初始使用者
--- 密碼: password123   PIN: 0001 / 0002 / 0003 / 0004
--- ============================================
-INSERT OR IGNORE INTO users (name, email, password_hash, pin_code, role_id) VALUES
-  ('老闆',   'boss@example.com',      'password123', '0001', 1),
-  ('店長',   'manager@example.com',   'password123', '0002', 2),
-  ('小主管', 'supervisor@example.com','password123', '0003', 3),
-  ('員工',   'staff@example.com',     'password123', '0004', 4);
 
 -- ============================================
 -- 分類

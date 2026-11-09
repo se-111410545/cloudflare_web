@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { AppEnv } from '../types';
 import { createStorage } from '../storage';
 import { authMiddleware, requireRole } from '../middleware/auth';
+import { requireAdminWrite } from '../middleware/admin-guard';
 
 const app = new Hono<AppEnv>();
 
@@ -29,18 +30,24 @@ app.get('/:key', async (c) => {
   });
 });
 
-app.delete('/:key', authMiddleware, requireRole(['Boss']), async (c) => {
-  const key = decodeURIComponent(c.req.param('key'));
-  const storage = createStorage(c.env);
-  await storage.delete(key);
+app.delete(
+  '/:key',
+  authMiddleware,
+  requireRole(['Boss']),
+  requireAdminWrite,
+  async (c) => {
+    const key = decodeURIComponent(c.req.param('key'));
+    const storage = createStorage(c.env);
+    await storage.delete(key);
 
-  // 同步清除商品上的圖片參照
-  await c.env.DB
-    .prepare('UPDATE products SET image_key = NULL WHERE image_key = ?')
-    .bind(key)
-    .run();
+    // 同步清除商品上的圖片參照
+    await c.env.DB
+      .prepare('UPDATE products SET image_key = NULL WHERE image_key = ?')
+      .bind(key)
+      .run();
 
-  return c.json({ success: true });
-});
+    return c.json({ success: true });
+  }
+);
 
 export default app;

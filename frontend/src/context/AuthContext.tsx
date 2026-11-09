@@ -8,7 +8,13 @@ export interface AuthUser {
   role: string;
   roleId: number;
   hierarchyLevel: number;
-  pinCode?: string;
+  hasPin?: boolean;
+  /**
+   * 管理權限範圍
+   *   full      → 完整管理能力（本機，或已設定 ALLOW_REMOTE_ADMIN=true）
+   *   restricted → 遠端鎖定：禁止增刪資料與變更權限，後端亦會拒絕
+   */
+  adminScope: 'full' | 'restricted';
 }
 
 interface AuthContextType {
@@ -17,6 +23,8 @@ interface AuthContextType {
   login: (token: string, user: AuthUser) => void;
   logout: () => void;
   hasPermission: (permissionKey: string) => boolean;
+  /** 目前環境是否禁止高風險管理寫入 */
+  adminRestricted: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,11 +59,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = '/login';
   };
 
-  // 檢查角色權限 (前端快取：Boss 全開，其他依 role 檢查)
+  // 檢查角色權限（前端快取：實際權限仍以後端 role_permissions 為準）
   const hasPermission = (permissionKey: string): boolean => {
     if (!user) return false;
     if (user.role === 'Boss') return true;
-    // 簡易映射：前端依階級推斷，實際按鈕顯示由後端 role_permissions 決定
     const level = user.hierarchyLevel;
     if (permissionKey === 'discount:30' || permissionKey === 'discount:50') {
       return level >= 3; // 店長以上
@@ -66,8 +73,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
+  const adminRestricted = user?.adminScope === 'restricted';
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, logout, hasPermission, adminRestricted }}
+    >
       {children}
     </AuthContext.Provider>
   );

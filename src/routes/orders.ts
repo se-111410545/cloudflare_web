@@ -1,6 +1,7 @@
 ﻿import { Hono } from 'hono';
 import { AppEnv } from '../types';
 import { authMiddleware, requireRole, requireMinHierarchy, checkPermission } from '../middleware/auth';
+import { requireAdminWrite } from '../middleware/admin-guard';
 
 const app = new Hono<AppEnv>();
 
@@ -155,11 +156,17 @@ app.patch('/:id/status', authMiddleware, async (c) => {
 });
 
 // -------------------------------------------------------
-// 刪除訂單 (僅 Boss)
-app.delete('/:id', authMiddleware, requireRole(['Boss']), async (c) => {
-  const id = c.req.param('id');
-  await c.env.DB.prepare('DELETE FROM orders WHERE id = ?').bind(id).run();
-  return c.json({ success: true });
-});
+// 刪除訂單 (僅 Boss，且受遠端管理寫入守門保護)
+app.delete(
+  '/:id',
+  authMiddleware,
+  requireRole(['Boss']),
+  requireAdminWrite,
+  async (c) => {
+    const id = c.req.param('id');
+    await c.env.DB.prepare('DELETE FROM orders WHERE id = ?').bind(id).run();
+    return c.json({ success: true });
+  }
+);
 
 export default app;
