@@ -37,3 +37,15 @@ Thumbs.db
 # 本機檔案儲存（商品圖片等使用者上傳內容）
 uploads/*
 !uploads/.gitkeep
+
+# ============================================================
+#  本機操作面板 / 儀表板（僅供本機操作使用）
+#  禁止推送至 GitHub，也禁止打包部署至 Cloudflare
+# ============================================================
+cloudflare_pos_operations_dashboard.html
+ops-control-panel.html
+*-ops-panel.html
+*-dashboard.html
+*-operations-dashboard.html
+*.local.html
+*.local.panel.html

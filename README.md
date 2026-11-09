@@ -10,6 +10,8 @@
 ```
 cloudflare_web/
 ├── wrangler.toml                  # Worker 設定（D1 / ALLOW_REMOTE_ADMIN，已無 R2）
+├── .wranglerignore                # ★ 部署忽略清單（禁止面板與機密被打包上傳）
+├── .gitignore                     # ★ Git 忽略清單（禁止面板被 push）
 ├── package.json                   # 根目錄 scripts（含 db:migrate 等）
 ├── tsconfig.json                  # Worker 型別檢查
 ├── tsconfig.server.json           # Node 本機伺服器型別檢查
@@ -26,6 +28,7 @@ cloudflare_web/
 │   ├── migrate.mjs                # 遷移執行器（自動記錄已套用檔案）
 │   ├── local-db.mjs               # 本機 D1 指標檔（記錄 database_id 對應的 SQLite）
 │   ├── seed.mjs                   # 種子（含 bcrypt 雜湊的使用者憑證）
+│   ├── seed-images.mjs            # ★ 商品圖片自動補齊（Unsplash → D1/磁碟）
 │   ├── reset-admin.mjs            # 重設管理者 PIN／密碼
 │   ├── env.mjs                    # .env 解析器
 │   ├── sync-dev-vars.mjs          # .env → .dev.vars（供 wrangler dev）
@@ -37,6 +40,7 @@ cloudflare_web/
 │   ├── storage-disk.ts            # 本機檔案儲存（uploads/）
 │   └── paths.ts                   # 路徑解析
 ├── uploads/                       # ★ 本機圖片儲存目錄（已 git 忽略）
+│   └── .gitkeep
 ├── src/                           # Hono Worker 後端
 │   ├── app.ts                     # App 工廠（Worker 與 Node 共用）
 │   ├── index.ts                   # Worker 進入點
@@ -222,6 +226,8 @@ npx wrangler secret put ALLOW_REMOTE_ADMIN   # 輸入 true 才開放遠端管理
 | `npm run db:migrate:remote` | 同上，但套用至雲端 D1 |
 | `npm run db:seed` | 匯入種子 + 以 bcrypt 寫入使用者憑證（讀取 `.env`） |
 | `npm run db:seed:remote` | 同上，雲端 D1 |
+| `npm run db:seed-images` | 補齊 16 項商品圖片（本機 D1 + uploads/ 磁碟） |
+| `npm run db:seed-images:remote` | 補齊 16 項商品圖片（雲端 D1） |
 | `npm run db:setup` | `db:migrate` + `db:seed`（首次設定用這個） |
 | `npm run db:reset` | 清空本機 D1 並重新建立（改了 migrations 後使用） |
 | `npm run db:reset-admin` | 重設管理者 PIN／密碼（互動式，預設本機） |
@@ -239,7 +245,160 @@ npx wrangler secret put ALLOW_REMOTE_ADMIN   # 輸入 true 才開放遠端管理
 
 ---
 
-## 檔案儲存（本機檔案，取代 R2）
+## 🏗️ 本機開發雙軌架構
+
+同一份後端程式碼（`src/`）在兩種執行環境下運作，行為一致但儲存後端不同。
+
+```
+┌─────────────────────────────── 本機（npm run dev）────────────────────┐
+│                                                                        │
+│  server/local.ts  (Node.js + @hono/node-server, port 8787)             │
+│    ├─ D1   → node:sqlite 直接開啟 wrangler --local 建立的同一份 SQLite   │
+│    └─ 檔案 → node:fs 寫入 uploads/（LocalDiskStorage）                 │
+│                                                                        │
+│  frontend (Vite, port 5173)  ──/api proxy──▶  127.0.0.1:8787            │
+└────────────────────────────────────────────────────────────────────────┘
+                    ↕  同一份 migrations/ 與同一份本機 SQLite
+        npm run db:migrate / db:seed  →  .wrangler/state/v3/d1/*.sqlite
+
+┌──────────────────────── 雲端（npm run deploy）───────────────────────┐
+│                                                                        │
+│  Cloudflare Worker (workerd, *.workers.dev)                            │
+│    ├─ D1   → 雲端 D1 資料庫（wrangler.toml 的 database_id）             │
+│    ├─ 檔案 → D1 uploads 資料表（base64 TEXT，D1BlobStorage）             │
+│    └─ 靜態 → frontend/dist（Workers Static Assets + SPA fallback）      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 為什麼要這樣分？
+
+Cloudflare Worker 的執行環境（workerd）**沒有檔案系統**（實測確認）：
+
+| 能力 | 結果 |
+|---|---|
+| `node:fs` 寫檔 | ✗ `[unenv] fs.writeFileSync is not implemented yet!` |
+| `ASSETS.put()`（靜態資產） | ✗ `The RPC receiver does not implement the method "put"` |
+
+因此：
+
+- **本機** → 用 Node.js 執行，`node:fs` 可用 → 圖片存 `uploads/`（方便直接開檔、體感快）
+- **雲端** → workerd 無磁碟 → 圖片存 D1 `uploads` 表（base64 TEXT）
+
+兩者透過 `FileStorage` 介面（`src/storage/types.ts`）統一：
+
+```ts
+export interface FileStorage {
+  put(key: string, data: ArrayBuffer, contentType: string): Promise<void>;
+  get(key: string): Promise<StoredFile | null>;
+  delete(key: string): Promise<void>;
+}
+```
+
+| 環境 | 實作 | 位置 |
+|---|---|---|
+| 本機 Node | `LocalDiskStorage` | `uploads/<key>` |
+| 雲端 Worker | `D1BlobStorage` | D1 `uploads` 資料表（base64） |
+
+### 本機 D1 與 Node 伺服器如何共用同一份資料庫
+
+`wrangler --local` 會在 `.wrangler/state/v3/d1/miniflare-D1DatabaseObject/` 建立 SQLite 檔，
+檔名是 `database_id` 的雜湊（無法直接計算）。
+`server/paths.ts` 透過 `.wrangler/local-db.json` 指標檔取得正確路徑，
+該指標由 `scripts/migrate.mjs` 在遷移後寫入。
+
+> 若你更換過 `wrangler.toml` 的 `database_id`，務必重新執行 `npm run db:setup`。
+
+---
+
+## 📸 商品圖片自動補齊
+
+```bash
+npm run db:seed-images          # 本機（同時寫 D1 與 uploads/ 磁碟）
+npm run db:seed-images:remote   # 雲端 D1
+npm run db:seed-images:remote -- --force   # 已存在也重新下載
+npm run db:seed-images:remote -- --only 咖啡  # 只補指定分類
+```
+
+**執行內容：**
+
+1. 從 D1 讀取所有商品
+2. 依商品名稱對應到 Unsplash 免費照片（可商用、無版權問題）
+   - 來源：`images.unsplash.com`（Unsplash 官方 CDN）
+   - 支援 URL 參數即時縮放裁切：`?w=720&h=720&fit=crop&q=75&fm=jpg`
+3. 下載後自動挑選合適解析度，確保 base64 後不超過 D1 的 100 KB 單一陳述上限
+4. 以與 `D1BlobStorage.put()` **完全相同**的格式寫入 `uploads` 資料表
+   （必要時以 `UPDATE ... SET data = data || ?` 分塊累加）
+5. 更新 `products.image_key`
+6. 清除未被任何商品引用的孤兒檔案
+7. 驗證每筆圖片的 `content_type` 與 `size`
+
+**本機模式會額外寫入 `uploads/` 磁碟**，讓本機 `npm run dev`
+（使用 `LocalDiskStorage`）也能立即顯示圖片，兩邊使用同一組 `image_key`。
+
+| 商品 | 圖片 | 商品 | 圖片 |
+|---|---|---|---|
+| 美式咖啡 | ☕ | 炸薯條 | 🍟 |
+| 拿鐵咖啡 | 🥛 | 洋芋片 | 🥔 |
+| 卡布奇諾 | ☕ | 提拉米蘇 | 🍰 |
+| 濃縮咖啡 | ⚫ | 巧克力蛋糕 | 🍫 |
+| 台灣珍珠奶茶 | 🧋 | 可麗餅 | 🥞 |
+| 綠茶拿鐵 | 🍵 | 冰淇淋 | 🍦 |
+| 鮮榨橙汁 | 🍊 | 火腿三明治 | 🥪 |
+| 冰紅茶 | 🧊 | 雞肉沙拉 | 🥗 |
+
+---
+
+## 🛠️ 本機控制面板使用說明
+
+專案根目錄提供 **`cloudflare_pos_operations_dashboard.html`** — 一個純前端的本機操作面板，
+用來快速檢視與執行常用維護指令（部署狀態、D1 查詢、密鑰設定、圖片補齊…）。
+
+### 安全隔離（重要）
+
+這個面板**僅供本機使用**，已同時被兩個清單排除：
+
+| 清單 | 作用 | 驗證方式 |
+|---|---|---|
+| `.gitignore` | 禁止 `git push` 上傳到 GitHub | `git check-ignore -v cloudflare_pos_operations_dashboard.html` |
+| `.wranglerignore` | 禁止 `wrangler deploy` 打包上傳到 Cloudflare | `npx wrangler deploy --dry-run` 輸出中僅有 Worker bundle |
+
+```bash
+# 確認不會被 git 追蹤
+git status --short                      # 不應出現 dashboard
+git check-ignore -v cloudflare_pos_operations_dashboard.html
+
+# 確認不會被打包部署
+npx wrangler deploy --dry-run --outdir .tmp-dryrun
+# 檢查輸出目錄，只應有 index.js / index.js.map / README.md
+```
+
+### 使用方式
+
+```bash
+# 1. 直接用瀏覽器開啟（無需伺服器）
+start cloudflare_pos_operations_dashboard.html
+```
+
+面板為單檔 HTML（Tailwind CDN + Lucide Icons），所有操作都在你的瀏覽器與本機終端機完成：
+
+| 面板功能 | 對應指令 |
+|---|---|
+| 部署 / 部署狀態檢視 | `npm run deploy` / `npx wrangler deployments list` |
+| 資料庫遷移（本機／遠端） | `npm run db:migrate` / `npm run db:migrate:remote` |
+| 種子資料匯入 | `npm run db:seed` / `npm run db:seed:remote` |
+| 重設管理者 PIN | `npm run db:reset-admin` |
+| 商品圖片補齊 | `npm run db:seed-images` / `npm run db:seed-images:remote` |
+| 設定遠端管理開關 | `npx wrangler secret put ALLOW_REMOTE_ADMIN` |
+| D1 查詢 | `npm run db:query -- "SELECT ..."` |
+
+> **提醒**：面板只是「指令產生器 + 執行紀錄」，真正的操作仍需在本機終端機執行指令。
+> 請勿將面板內容或其中的憑證公開分享；它已被 `.gitignore` 排除，不會隨 push 上傳。
+> 密鑰（`JWT_SECRET`、`ALLOW_REMOTE_ADMIN`）請透過 `wrangler secret put` 設定，
+> **不要**寫進面板或任何會被提交到 Git 的檔案。
+
+---
+
+## 📁 檔案儲存（本機檔案，取代 R2）
 
 ### 為什麼要改？
 
@@ -387,11 +546,60 @@ staff:manage / permission:manage / analytics:view
 
 | 指令 | 說明 |
 |---|---|
-| `npm run dev` | Node 本機伺服器（含熱重載） |
-| `npm run dev:web` | Vite 前端開發伺服器 |
-| `npm run dev:worker` | 以 wrangler/workerd 執行（檔案改用 D1 BLOB 儲存） |
+| `npm run dev` | Node 本機伺服器（含熱重載，:8787） |
+| `npm run dev:web` | Vite 前端開發伺服器（:5173） |
+| `npm run dev:worker` | 以 wrangler/workerd 執行（檔案改用 D1 base64 儲存） |
 | `npm run typecheck` | 檢查 Worker + Server 兩套型別 |
 | `npm run build` | 型別檢查 + 前端建置 |
+| `npm run deploy` | 型別檢查 → 前端建置 → `wrangler deploy`（含 assets） |
+
+> ⚠️ `npm run dev` 與 `npm run dev:worker` **不能同時執行**（同用 8787 埠），
+> Windows 上會讓 workerd 直接 `std::terminate()` 崩潰。
+
+---
+
+## 📋 完整指令速查
+
+```bash
+# ── 安裝 ──────────────────────────────────────────────
+npm install
+npm --prefix frontend install
+
+# ── 環境變數（首次必做）───────────────────────────────
+cp .env.example .env
+notepad .env                    # 設定 ADMIN_PIN / ADMIN_PASSWORD
+
+# ── 資料庫 ────────────────────────────────────────────
+npm run db:setup                # 本機：遷移 + 種子（含 bcrypt 憑證）
+npm run db:migrate              # 僅遷移
+npm run db:migrate:remote       # 遷移至雲端
+npm run db:seed                 # 僅種子
+npm run db:seed:remote          # 種子至雲端
+npm run db:seed-images          # 補齊商品圖片（本機）
+npm run db:seed-images:remote   # 補齊商品圖片（雲端）
+npm run db:reset                # 清空重建本機資料庫
+npm run db:reset-admin          # 重設管理者 PIN（互動式）
+npm run db:reset-admin -- --remote --pin 8642
+npm run db:query -- "SELECT * FROM products LIMIT 5"
+
+# ── 開發 ──────────────────────────────────────────────
+npm run dev                     # 後端 API  :8787
+npm run dev:web                 # 前端      :5173
+npm run dev:worker              # wrangler  :8787
+
+# ── 檢查與部署 ────────────────────────────────────────
+npm run typecheck
+npm run build
+npm run deploy                  # 建置 + 部署 Worker（含前端 assets）
+npx wrangler deploy --dry-run --outdir .tmp-dryrun   # 部署前檢查
+
+# ── Cloudflare ────────────────────────────────────────
+npx wrangler login
+npx wrangler d1 create pos-db
+npx wrangler secret put JWT_SECRET
+npx wrangler secret put ALLOW_REMOTE_ADMIN   # 輸入 true 才開放遠端管理
+npx wrangler deployments list
+```
 
 ---
 

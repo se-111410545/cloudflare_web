@@ -11,6 +11,8 @@
     "db:migrate:remote": "node scripts/migrate.mjs --remote",
     "db:seed": "tsx scripts/seed.mjs",
     "db:seed:remote": "tsx scripts/seed.mjs --remote",
+    "db:seed-images": "tsx scripts/seed-images.mjs",
+    "db:seed-images:remote": "tsx scripts/seed-images.mjs --remote",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "db:reset": "node scripts/reset-db.mjs",
     "db:reset-admin": "tsx scripts/reset-admin.mjs",
