@@ -90,3 +90,24 @@ serve(
     console.log('');
   }
 );
+
+// 埠被占用時給出友善訊息，避免直接噴出原始 stack trace
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error('');
+    console.error(`  ✖ 連接埠 ${PORT} 已被占用。`);
+    console.error('');
+    console.error('    可能原因：');
+    console.error('      - 已經有另一個 `npm run dev` 或 `npm run dev:worker` 在執行');
+    console.error('      - 上一次啟動的伺服器尚未關閉');
+    console.error('');
+    console.error('    處理方式（Windows PowerShell）：');
+    console.error(`      Get-NetTCPConnection -LocalPort ${PORT} | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
+    console.error('');
+    console.error('    或改用其他連接埠：');
+    console.error(`      $env:PORT=8788; npm run dev`);
+    console.error('');
+    process.exit(1);
+  }
+  throw err;
+});
